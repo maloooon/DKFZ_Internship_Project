@@ -20,7 +20,11 @@ class numAE(torch.nn.Module):
         self.fc2 = Linear(400,200)
         self.fc3 = Linear(200,100)
 
+        # canonical variable
+        self.fc4 = Linear(100,1)
+
         # Decoding
+        self.fc4_d = Linear(1,100)
         self.fc3_d = Linear(100,200)
         self.fc2_d = Linear(200,400)
         self.fc1_d = Linear(400,self.in_size)
@@ -31,8 +35,11 @@ class numAE(torch.nn.Module):
     def nn_forward_pass(self,x):
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
-        x, x_bottleneck = F.relu(self.fc3(x)), F.relu(self.fc3(x))
+        x = F.relu(self.fc3(x))
+        # no activation
+        x, x_bottleneck = self.fc4(x), self.fc4(x)
         
+        x = self.fc4_d(x)
         x = F.relu(self.fc3_d(x))
         x = F.relu(self.fc2_d(x))
         x = F.relu(self.fc1_d(x))

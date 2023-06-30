@@ -49,7 +49,11 @@ class CCA(torch.nn.Module):
         self.fc1 = Linear(in_features=2809, out_features=400)
         self.fc2 = Linear(in_features=400, out_features=100)
 
+        # canonical variable
+        self.fc3 = Linear(in_features=100, out_features=1)
+
         # Decoder
+        self.fc3_d = Linear(in_features=1, out_features=100)
         self.fc2_d = Linear(in_features=100, out_features=400)
         self.fc1_d = Linear(in_features=400, out_features=2809)
 
@@ -85,13 +89,17 @@ class CCA(torch.nn.Module):
         x = self.maxpool2(x)
 
         # Flatten every dimension but batch
-        x = flatten(x,start_dim=1)
+        x, x_flattened = flatten(x,start_dim=1), flatten(x,start_dim=1)
 
         x = F.relu(self.fc1(x))
-        x, x_bottleneck = F.relu(self.fc2(x)), F.relu(self.fc2(x))
+        x = F.relu(self.fc2(x))
+        # no activation
+        x, x_bottleneck = self.fc3(x), self.fc3(x)
 
+        x = self.fc3_d(x)
         x = F.relu(self.fc2_d(x))
         x = F.relu(self.fc1_d(x))
+    
 
         x_size = int(sqrt(x.size(dim=1))) 
 
@@ -110,7 +118,7 @@ class CCA(torch.nn.Module):
         assert(x.size(dim=1) == self.n_channels_cnn 
                and x.size(dim=2) == 224 and x.size(dim=3) == 224) , "wrong sizes"
 
-        return x, x_bottleneck
+        return x, x_flattened, x_bottleneck
         
 
 
