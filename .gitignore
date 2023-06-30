@@ -6,3 +6,11 @@
 /tests.py
 /tiles.csv
 /tiles_filters.csv
+FactorLoadings/test_batch_3/Patches/fl_patch_0
+FactorLoadings/test_batch_3/Patches/fl_patch_1
+FactorLoadings/test_batch_3/Patches/fl_patch_2
+FactorLoadings/test_batch_3/Patches/fl_patch_3
+FactorLoadings/test_batch_3/RNA/rna_fl_patch_0
+FactorLoadings/test_batch_3/RNA/rna_fl_patch_1
+FactorLoadings/test_batch_3/RNA/rna_fl_patch_2
+FactorLoadings/test_batch_3/RNA/rna_fl_patch_3
