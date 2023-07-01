@@ -108,7 +108,12 @@ def training_loop(batch_size,epochs):
 
             # Sample image patches (in one epoch we want to go through all patches for respective sample batch size)
             # e.g. batch_size = 3 gives 3 patches for 3 samples
+
+            amount_patches = len(data[1])
+            correlations = torch.empty(amount_patches,1)
+            vector_patches_sample_0 = [] # TODO : testing for just one sample
             for substep, patch_sample in enumerate(data[1]):
+            
                 decoded_output_num, bottleneck_value_num = MODEL_2.nn_forward_pass(data[0])
                 decoded_output_img, vector_patch, bottleneck_value_img = MODEL_1.nn_forward_pass(patch_sample)
                 
@@ -132,46 +137,59 @@ def training_loop(batch_size,epochs):
 
 
                 # Maximize correlation --> minimize negative correlation
-                loss_correlation = - torch.tensor(pearsonr(bottleneck_value_num_list, bottleneck_value_img_list)[0],
+                loss_correlation = torch.tensor(pearsonr(bottleneck_value_num_list, bottleneck_value_img_list)[0],
                                                             requires_grad = True)
+                
+                correlations[substep] = loss_correlation
+
                 alpha = 0.25
                 beta = 0.25
                 gamma = 0.5
-                full_loss = alpha * loss_reconstruction_num + beta * loss_reconstruction_img + gamma * loss_correlation
-
-
-                # Factor loadings (or correlation coefficients) : Calculate correlation between original data features and bottlenecks
-                # For RNA, we calculate to the given corresponding rna features, for the image to the first resulting vector in CNN
-                amount_rna_features = data[0].size(dim=1)
-                amount_patch_features = vector_patch.size(dim=1)
-                factor_loadings_rna = torch.empty(amount_rna_features,1)
-                factor_loadings_image_patch = torch.empty(amount_patch_features,1) # dim = 3 also possible (width x height)
+                full_loss = alpha * loss_reconstruction_num + beta * loss_reconstruction_img + gamma * - loss_correlation
 
 
 
-                # These two loops take long time (especially the one for RNA since 17000 values)
-
-                # For RNA data
-                for i in range(amount_rna_features):
-                    current_rna_feature_list = data[0][:,i].tolist()
-                    factor_loadings_rna[i] = pearsonr(bottleneck_value_num_list, current_rna_feature_list)[0]
-
-                
-                    
-                
-                # For patch vector data
-                for i in range(amount_patch_features):
-                    current_patch_feature_list = vector_patch[:,i].tolist()
-                    factor_loadings_image_patch[i] = pearsonr(bottleneck_value_img_list, current_patch_feature_list)[0]
-                
 
                 if epoch == EPOCHS - 1:
+                    # Factor loadings (or correlation coefficients) : Calculate correlation between original data features and bottlenecks
+                    # For RNA, we calculate to the given corresponding rna features, for the image to the first resulting vector in CNN
+                    amount_rna_features = data[0].size(dim=1)
+                    amount_patch_features = vector_patch.size(dim=1)
+                    amount_patches = len(data[1])
+                    factor_loadings_rna = torch.empty(amount_rna_features,1)
+                    factor_loadings_image_patch = torch.empty(amount_patch_features,1) # dim = 3 also possible (width x height)
+      
+                    # These two loops take long time (especially the one for RNA since 17000 values)
+
+                    # For RNA data
+                    for i in range(amount_rna_features):
+                        current_rna_feature_list = data[0][:,i].tolist()
+                        factor_loadings_rna[i] = pearsonr(bottleneck_value_num_list, current_rna_feature_list)[0]
+
+                    # For patch vector data
+                    for i in range(amount_patch_features):
+                        current_patch_feature_list = vector_patch[:,i].tolist()
+                        factor_loadings_image_patch[i] = pearsonr(bottleneck_value_img_list, current_patch_feature_list)[0]
+
+                    
+
+
                     if substep == len(data[1]) - 1:
                         # Only needed for last step since we have the same rna data for the substeps
                         temp_loading_rna = pd.DataFrame(factor_loadings_rna.numpy())
                         temp_loading_rna.to_csv('FactorLoadings/test_batch_3/RNA/rna_fl_patch_{}'.format(substep))
+                        # Also save all the correlation values just once
+                        temp_correlations = pd.DataFrame(correlations.detach().numpy()) # TODO : ist detach global ? muss man hiernach wieder attachen ??
+                        temp_correlations.to_csv('FactorLoadings/test_batch_3/Correlations/correlation_values_patches')
+                    # TODO : zsm in eine csv file (rows : features, column patches)
                     temp_loading_patch = pd.DataFrame(factor_loadings_image_patch.numpy())
                     temp_loading_patch.to_csv('FactorLoadings/test_batch_3/Patches/fl_patch_{}'.format(substep))
+
+                
+                    vector_patches_sample_0.append(vector_patch[0,:].detach().tolist()) # TODO : ist detach global ? muss man hiernach wieder attachen ?? ; TODO : testing for just one sample
+                    
+        
+
 
 
                 OPTIMIZER_1.zero_grad()
@@ -179,8 +197,15 @@ def training_loop(batch_size,epochs):
                 full_loss.backward()
                 OPTIMIZER_1.step()
                 OPTIMIZER_2.step()
+            
+            
 
                 print(f'epoch {epoch} step {step} substep {substep} loss reconstruction num {loss_reconstruction_num} loss reconstruction img {loss_reconstruction_img} loss correlation {loss_correlation}')
+
+            names = ['patch_{}'.format(i) for i in range(len(data[1]))]
+            vector_patches_df = pd.DataFrame.from_dict(dict(zip(names, vector_patches_sample_0))) # TODO : testing for just one sample
+            vector_patches_df.to_csv('FactorLoadings/test_batch_3/FlattenedImageVectorsPerPatch/flattened_vectors')
+
 
 
             
