@@ -5,6 +5,10 @@ from torch.nn import ConvTranspose2d
 from math import sqrt
 import torch.nn.functional as F
 import pandas as pd 
+import numpy as np 
+import PIL
+from PIL import Image
+from matplotlib import pyplot as plt
 
 
 
@@ -30,6 +34,9 @@ class decodernumAE(torch.nn.Module):
         x : first flattened vector (after last pooling operation) in imgAE
         
         """
+
+        # Convert to double (needed for conv layers)
+        x = x.float()
         x_size = int(sqrt(x.size(dim=1))) 
 
         # Reshape into img form
@@ -38,19 +45,58 @@ class decodernumAE(torch.nn.Module):
         curr_batch_size = x.size(dim=0)
         x = x.reshape([curr_batch_size,1,x_size,x_size])
 
-
+        # Create img-form (53x53) of attention weights too
+      #  att_size = int(sqrt(attention_weights.size(dim=1)))
+      #  curr_att_size = attention_weights.size(dim=0)
+        
+      #  assert(curr_batch_size == curr_att_size), "attention and batch size are not the same"
+      #  attention_weights = attention_weights.reshape([curr_att_size,1,att_size,att_size])
 
         x = self.maxpool2_d(x)
 
+        # Pooling operation for attention weights : create 4 (since 2x2 pooling) attentions for each singleton attention by
+        # calculating 1/4 * original attention for each
+        new_attention_weights = torch.empty(size=(1,4 * attention_weights.size(dim=1)))
+
+        for i in range(attention_weights.size(dim=1)):
+            for y in range(i*4,i*4+4,1):
+                new_attention_weights[:,y] = 1/4 * attention_weights[:,i]
+
+
+
+        # Reshape attention to img form so we can use conv2_d on attention weights too TODO: something more sophisticated here?
+        attention_size = int(sqrt(new_attention_weights.size(dim=1)))
+
+        new_attention_weights = new_attention_weights.reshape(curr_batch_size,1,attention_size,attention_size)
         x = F.relu(self.conv2_d(x))
+        new_attention_weights = self.conv2_d(new_attention_weights)
+
+        channels = new_attention_weights.size(dim=1)
+
+        new_attention_weights = new_attention_weights.reshape(curr_batch_size,channels,-1)
+
+        # TODO : also make this code cleaner
+        placeholder = torch.empty(size=(1,channels,4*new_attention_weights.size(dim=2)))
+        for channel in range(new_attention_weights.size(dim=1)):
+            for i in range(new_attention_weights.size(dim=2)):
+                for y in range(i*4,i*4+4,1):
+                    placeholder[:,channel,y] = 1/4 * new_attention_weights[:,channel,i]
+        
+        new_attention_weights = placeholder
+        new_attention_weights_size = int(sqrt(new_attention_weights.size(dim=2)))
+        new_attention_weights = new_attention_weights.reshape(curr_batch_size,channels,new_attention_weights_size,new_attention_weights_size)
+
 
         x = self.maxpool1_d(x)
+
+
         x = F.relu(self.conv1_d(x))
+        new_attention_weights = self.conv1_d(new_attention_weights)
 
         assert(x.size(dim=1) == self.n_channels_cnn 
                and x.size(dim=2) == 224 and x.size(dim=3) == 224) , "wrong sizes"
 
-        return x
+        return x, new_attention_weights
 
 
 
@@ -92,6 +138,17 @@ def attention_weights(rna_feature_idx,rna_loadings, correlations, patches_loadin
 
 
 
+def tensor_to_image(tensor):
+    tensor = tensor*255
+    tensor = np.array(tensor.detach(), dtype=np.uint8)
+    if np.ndim(tensor)>3:
+        assert tensor.shape[0] == 1
+        tensor = tensor[0]
+    # Rearrange
+    tensor = tensor.reshape(224,224,3)
+    plt.imshow(tensor, interpolation='nearest')
+    plt.show()
+   
 
 
 
@@ -106,6 +163,13 @@ if __name__ == '__main__':
 
 
     PATH  = 'cnn_ae_model/cnn_model.pt'
+
+    flattened_vectors_from_patches_df = pd.read_csv('FactorLoadings/test_batch_3/FlattenedImageVectorsPerPatch/flattened_vectors')
+    # take first patch (first column)
+    # Get into right structure (batch_size, features)
+    flattened_vector_patch_0 = torch.tensor(flattened_vectors_from_patches_df['patch_0']).unsqueeze(dim=0)
+    attention_weights_patch_0 = patch_attention_weights[0].squeeze(dim=1).unsqueeze(dim=0)
+
     pre_model = torch.load(PATH)
     # Pretrained state dict (weights & biases)
     pretrained_dict = pre_model
@@ -119,6 +183,12 @@ if __name__ == '__main__':
     model_dict.update(pretrained_dict)
 
     model.load_state_dict(model_dict)
+
+    img_patch, attention_patch = model.nn_forward_pass(flattened_vector_patch_0, attention_weights_patch_0)
+
+    img_patch_show = tensor_to_image(attention_patch)
+
+    print("h")
 
    
 

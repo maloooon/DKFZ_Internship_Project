@@ -9,6 +9,10 @@ from torch.optim import SGD
 from torch.nn import MSELoss
 from scipy.stats import pearsonr  
 import itertools
+import numpy as np
+from PIL import Image
+from matplotlib import pyplot as plt
+
 # TODO : ein Dataset/Dataloader , über Index dann an img / num AE geben
 # TODO : own loss function (maybe as class like in SuMO) to wrap reconstruction loss and maximizing correlation
 
@@ -188,6 +192,10 @@ def training_loop(batch_size,epochs):
                 
                     vector_patches_sample_0.append(vector_patch[0,:].detach().tolist()) # TODO : ist detach global ? muss man hiernach wieder attachen ?? ; TODO : testing for just one sample
                     
+
+                    if substep == 0:
+                        decoded_patch_0 = decoded_output_img[0,:,:,:]
+                        tensor_to_image(decoded_patch_0)
         
 
 
@@ -213,9 +221,24 @@ def training_loop(batch_size,epochs):
     # save CNN model
     torch.save(MODEL_1.state_dict(), 'cnn_ae_model/cnn_model.pt')
 
+    return decoded_patch_0
+
+
+def tensor_to_image(tensor):
+    tensor = tensor*255
+    tensor = np.array(tensor.detach(), dtype=np.uint8)
+    if np.ndim(tensor)>3:
+        assert tensor.shape[0] == 1
+        tensor = tensor[0]
+    # Rearrange
+    tensor = tensor.reshape(224,224,3)
+    plt.imshow(tensor, interpolation='nearest')
+    plt.show()
+
 
 if __name__ == '__main__':
-    training_loop(3,1)
+    patch_0 = training_loop(3,1)
+    tensor_to_image(patch_0)
 
 
 
