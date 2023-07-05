@@ -58,3 +58,6 @@ FactorLoadings/test_batch_3/Patches/fl_patch_42
 FactorLoadings/test_batch_3/Patches/fl_patch_43
 FactorLoadings/test_batch_3/Patches/fl_patch_44
 FactorLoadings/test_batch_3/RNA/rna_fl_patch_44
+test.png
+__pycache__/imgAE.cpython-311.pyc
+__pycache__/numAE.cpython-311.pyc

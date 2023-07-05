@@ -3,9 +3,11 @@ from torch.nn import Linear
 import torch.nn.functional as F
 from torch.optim import SGD 
 from torch.nn import MSELoss
+from torch.nn import CrossEntropyLoss
 from torch.utils.data import Dataset, DataLoader
 import os 
 import pandas as pd 
+from matplotlib import pyplot as plt
 
 
 
@@ -16,33 +18,58 @@ class numAE(torch.nn.Module):
 
 
         # Encoding
-        self.fc1 = Linear(self.in_size,400)
-        self.fc2 = Linear(400,200)
-        self.fc3 = Linear(200,100)
-
+       # self.fc1 = Linear(self.in_size,1600)
+        self.fc2 = Linear(self.in_size,500)
+        self.fc3 = Linear(500,250)
+        self.fc4 = Linear(250,64)
+        self.fc5 = Linear(64,1)
+       # self.fc6 = Linear(100,64)
+       # self.fc7 = Linear(64,32)
+       # self.fc8 = Linear(32,8)
+       # self.fc9 = Linear(8,4)
         # canonical variable
-        self.fc4 = Linear(100,1)
+       # self.fc10 = Linear(4,1)
 
         # Decoding
-        self.fc4_d = Linear(1,100)
-        self.fc3_d = Linear(100,200)
-        self.fc2_d = Linear(200,400)
-        self.fc1_d = Linear(400,self.in_size)
+       # self.fc10_d = Linear(1,4)
+       # self.fc9_d = Linear(4,8)
+       # self.fc8_d = Linear(8,32)
+       # self.fc7_d = Linear(32,64)
+       # self.fc6_d = Linear(64,100)
+        self.fc5_d = Linear(1,64)
+        self.fc4_d = Linear(64,250)
+        self.fc3_d = Linear(250,500)
+        self.fc2_d = Linear(500,self.in_size)
+     #   self.fc1_d = Linear(1600,self.in_size)
 
 
 
     
     def nn_forward_pass(self,x):
-        x = F.relu(self.fc1(x))
+        
+     #   x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         x = F.relu(self.fc3(x))
+        x = F.relu(self.fc4(x))
+     #   x = F.relu(self.fc5(x))
+     #   x = F.relu(self.fc6(x))
+     #   x = F.relu(self.fc7(x))
+     #   x = F.relu(self.fc8(x))
+     #   x = F.relu(self.fc9(x))
         # no activation
-        x, x_bottleneck = self.fc4(x), self.fc4(x)
-        
-        x = self.fc4_d(x)
+        x, x_bottleneck = self.fc5(x), self.fc5(x)
+      #  x, x_bottleneck = self.fc10(x), self.fc10(x)
+      #  x = self.fc10_d(x)
+
+      #  x = F.relu(self.fc9_d(x))
+      #  x = F.relu(self.fc8_d(x))
+      #  x = F.relu(self.fc7_d(x))
+      #  x = F.relu(self.fc6_d(x))
+        x = F.relu(self.fc5_d(x))
+        x = F.relu(self.fc4_d(x))
         x = F.relu(self.fc3_d(x))
         x = F.relu(self.fc2_d(x))
-        x = F.relu(self.fc1_d(x))
+     #   x = F.relu(self.fc1_d(x))
 
 
         return x , x_bottleneck
@@ -71,7 +98,7 @@ class numDataset(Dataset):
 
 
 
-def training_loop(epochs):
+def training_loop(epochs,batch_size):
     train_loss = []
     EPOCHS = epochs
     
@@ -80,11 +107,11 @@ def training_loop(epochs):
     
 
     dataset = numDataset()
-    data_loader = DataLoader(dataset,batch_size=5,shuffle=True)
+    data_loader = DataLoader(dataset,batch_size=batch_size,shuffle=True)
 
 
     MODEL = numAE(in_size=dataset.__numfeats__())
-    OPTIMIZER = SGD(MODEL.parameters(), lr=0.001, momentum=0.9)
+    OPTIMIZER = SGD(MODEL.parameters(), lr=0.0001, momentum=0.9)
     for i in range(EPOCHS):
         for c, data in enumerate(data_loader):
 
@@ -101,9 +128,16 @@ def training_loop(epochs):
 
             print(f'epoch {i} step {c} loss {loss}')
     
+    # Plot final loss after lass epoch
+    
+    plt.plot(train_loss, label='train_loss')
+    plt.legend()
+    plt.show()
+
+    
 
 if __name__ == '__main__':
-    training_loop(5)
+    training_loop(200,64)
 
 
 

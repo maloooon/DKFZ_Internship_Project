@@ -12,6 +12,8 @@ import itertools
 import numpy as np
 from PIL import Image
 from matplotlib import pyplot as plt
+from torchmetrics import PearsonCorrCoef
+import math 
 
 # TODO : ein Dataset/Dataloader , über Index dann an img / num AE geben
 # TODO : own loss function (maybe as class like in SuMO) to wrap reconstruction loss and maximizing correlation
@@ -98,13 +100,18 @@ def training_loop(batch_size,epochs):
     # Loss function(s) : combination correlation maximization and reconstruction loss
     LOSS_FUNC_RECONSTRUCTION = MSELoss()
     
-
+    train_loss = []
+    train_loss_reconstruction_rna = []
+    train_loss_reconstruction_img = []
+    train_loss_correlation = []
     for epoch in range(EPOCHS):
         for step, data in enumerate(data_loader):
             for counter,specific in enumerate(data):
                 if counter == 0:
+                    # At position 0 , we have RNA data (batch_size, features)
                     data[counter] = data[counter].type(torch.FloatTensor)
                 else:
+                    # At position 1 , we have the patches (patches, (batch_size, channels, width, height))
                     for counter2, _ in enumerate(specific):
                         data[counter][counter2] = data[counter][counter2].type(torch.FloatTensor)
             
@@ -114,7 +121,7 @@ def training_loop(batch_size,epochs):
             # e.g. batch_size = 3 gives 3 patches for 3 samples
 
             amount_patches = len(data[1])
-            correlations = torch.empty(amount_patches,1)
+            correlations = torch.empty(amount_patches,1,requires_grad=False) # Just save correlations, no gradient needed for that list
             vector_patches_sample_0 = [] # TODO : testing for just one sample
             for substep, patch_sample in enumerate(data[1]):
             
@@ -129,28 +136,35 @@ def training_loop(batch_size,epochs):
                 # Thus for the numerical data, we have the same values in a batch --> when calculating standard deviation
                 # across batch where all values the same --> 0 and in correlation calculation divided by 0 --> returns NaN
 
+                # TODO : fix later on for corrleation matrices if needed , doesn't work with dimensions x,1 for some reason
+                # TODO : squeeze ist auch dann im gradient mit drin ; ist das okay oder sollte das nicht passieren ?
 
-                # bottleneck --> canonical variables
-                bottleneck_value_num_list = list(itertools.chain.from_iterable(bottleneck_value_num.detach()))
-                for c,i in enumerate(bottleneck_value_num_list):
-                    bottleneck_value_num_list[c] = bottleneck_value_num_list[c].item()
+                pearson = PearsonCorrCoef()
+                
+                loss_correlation = pearson(bottleneck_value_num.squeeze(dim=1),bottleneck_value_img.squeeze(dim=1))
 
-                bottleneck_value_img_list = list(itertools.chain.from_iterable(bottleneck_value_img.detach()))
-                for c,i in enumerate(bottleneck_value_img_list):
-                    bottleneck_value_img_list[c] = bottleneck_value_img_list[c].item()
+
+                # TODO : PROBLEM : in some cases , correlation is 1 or -1 and then in the very next step becomes NaN which breaks
+                #                   the whole training loop 
+                if math.isnan(loss_correlation): 
+                    break
 
 
                 # Maximize correlation --> minimize negative correlation
-                loss_correlation = torch.tensor(pearsonr(bottleneck_value_num_list, bottleneck_value_img_list)[0],
-                                                            requires_grad = True)
-                
-                correlations[substep] = loss_correlation
+                # TODO : variance --> feature selection 
 
-                alpha = 0.25
-                beta = 0.25
-                gamma = 0.5
+                # Save correlations in list ; detach first 
+                loss_correlation_d_copy = loss_correlation.clone().detach()
+                correlations[substep] = loss_correlation_d_copy
+
+                alpha = 0.10 # same samples during substeps --> learns fast
+                beta = 0.45
+                gamma = 0.45
                 full_loss = alpha * loss_reconstruction_num + beta * loss_reconstruction_img + gamma * - loss_correlation
-
+                train_loss.append(float(full_loss))
+                train_loss_reconstruction_rna.append(float(loss_reconstruction_num))
+                train_loss_reconstruction_img.append(float(loss_reconstruction_img))
+                train_loss_correlation.append(float(-loss_correlation))
 
 
 
@@ -160,20 +174,26 @@ def training_loop(batch_size,epochs):
                     amount_rna_features = data[0].size(dim=1)
                     amount_patch_features = vector_patch.size(dim=1)
                     amount_patches = len(data[1])
-                    factor_loadings_rna = torch.empty(amount_rna_features,1)
-                    factor_loadings_image_patch = torch.empty(amount_patch_features,1) # dim = 3 also possible (width x height)
+                    factor_loadings_rna = torch.empty(amount_rna_features,1, requires_grad=False)
+                    factor_loadings_image_patch = torch.empty(amount_patch_features,1,requires_grad=False) # dim = 3 also possible (width x height)
       
                     # These two loops take long time (especially the one for RNA since 17000 values)
 
                     # For RNA data
+                    bottleneck_value_num_d_copy = bottleneck_value_num.clone().detach()
                     for i in range(amount_rna_features):
-                        current_rna_feature_list = data[0][:,i].tolist()
-                        factor_loadings_rna[i] = pearsonr(bottleneck_value_num_list, current_rna_feature_list)[0]
+                        # Take original RNA features
+                        current_rna_features = data[0][:,i] # data[0] just refers to RNA data (for curr batch)
+                        factor_loadings_rna[i] = pearson(bottleneck_value_num_d_copy.squeeze(dim=1),current_rna_features)
+                        
+
 
                     # For patch vector data
+                    bottleneck_value_img_d_copy = bottleneck_value_img.clone().detach()
                     for i in range(amount_patch_features):
-                        current_patch_feature_list = vector_patch[:,i].tolist()
-                        factor_loadings_image_patch[i] = pearsonr(bottleneck_value_img_list, current_patch_feature_list)[0]
+                        # Take the first flattened vector from CNN (after last pooling operation)
+                        current_patch_features = vector_patch[:,i]
+                        factor_loadings_image_patch[i] = pearson(bottleneck_value_img_d_copy.squeeze(dim=1), current_patch_features.detach())
 
                     
 
@@ -183,19 +203,20 @@ def training_loop(batch_size,epochs):
                         temp_loading_rna = pd.DataFrame(factor_loadings_rna.numpy())
                         temp_loading_rna.to_csv('FactorLoadings/test_batch_3/RNA/rna_fl_patch_{}'.format(substep))
                         # Also save all the correlation values just once
-                        temp_correlations = pd.DataFrame(correlations.detach().numpy()) # TODO : ist detach global ? muss man hiernach wieder attachen ??
+                        temp_correlations = pd.DataFrame(correlations.numpy()) # TODO : ist detach global ? muss man hiernach wieder attachen ??
                         temp_correlations.to_csv('FactorLoadings/test_batch_3/Correlations/correlation_values_patches')
                     # TODO : zsm in eine csv file (rows : features, column patches)
                     temp_loading_patch = pd.DataFrame(factor_loadings_image_patch.numpy())
                     temp_loading_patch.to_csv('FactorLoadings/test_batch_3/Patches/fl_patch_{}'.format(substep))
 
-                
-                    vector_patches_sample_0.append(vector_patch[0,:].detach().tolist()) # TODO : ist detach global ? muss man hiernach wieder attachen ?? ; TODO : testing for just one sample
+                    vector_patch_0_d_copy = vector_patch[0,:].clone().detach()
+                    vector_patches_sample_0.append(vector_patch_0_d_copy.tolist()) # TODO : test for single sample 0
                     
-
-                    if substep == 0:
-                        decoded_patch_0 = decoded_output_img[0,:,:,:]
-                        tensor_to_image(decoded_patch_0)
+                    # TESTING
+                 #   if substep == 0:
+                 #       decoded_output_img_d_copy = decoded_output_img[0,:,:,:].clone().detach()
+                 #       decoded_patch_0 = decoded_output_img_d_copy
+                 #       tensor_to_image(decoded_patch_0)
         
 
 
@@ -215,30 +236,39 @@ def training_loop(batch_size,epochs):
             vector_patches_df.to_csv('FactorLoadings/test_batch_3/FlattenedImageVectorsPerPatch/flattened_vectors')
 
 
-
+    # Plot final loss after last epoch
+    
+    plt.plot(train_loss, label='train_loss', color= 'blue')
+    plt.plot(train_loss_reconstruction_rna, label='rna loss', color='green')
+    plt.plot(train_loss_reconstruction_img, label ='img loss', color='purple')
+    plt.plot(train_loss_correlation, label='corr loss', color='red')
+    plt.legend(loc='upper center')
+    plt.show()
             
 
     # save CNN model
     torch.save(MODEL_1.state_dict(), 'cnn_ae_model/cnn_model.pt')
 
-    return decoded_patch_0
+  #  return decoded_patch_0
 
 
 def tensor_to_image(tensor):
     tensor = tensor*255
-    tensor = np.array(tensor.detach(), dtype=np.uint8)
+    tensor = np.array(tensor, dtype=np.uint8)
     if np.ndim(tensor)>3:
         assert tensor.shape[0] == 1
         tensor = tensor[0]
     # Rearrange
     tensor = tensor.reshape(224,224,3)
     plt.imshow(tensor, interpolation='nearest')
+   
     plt.show()
 
 
 if __name__ == '__main__':
-    patch_0 = training_loop(3,1)
-    tensor_to_image(patch_0)
+    patch_0 = training_loop(3,30)
+   
+ #   tensor_to_image(patch_0)
 
 
 

@@ -13,10 +13,17 @@ from math import sqrt
 from torch.optim import SGD 
 from torch.nn import CrossEntropyLoss
 from torch.nn import MSELoss
+from torch.nn import BCELoss
+from torch.optim import Adam
 from torch.nn import Parameter
 from torch.nn import ParameterList
 from torch.utils.data import Dataset, DataLoader
 import glob 
+import torchvision.transforms as T
+from matplotlib import pyplot as plt
+import numpy as np 
+import PIL
+from torchvision.io import read_image
 
 
 class CCA(torch.nn.Module):
@@ -33,6 +40,27 @@ class CCA(torch.nn.Module):
         # CNN structure
         # Encoder
         # img size 224x 224
+        # we use padding so we keep the picture size : only reduce with max pool operations 
+        self.conv1 = Conv2d(in_channels=n_channels_cnn,out_channels=16,kernel_size=(3,3), padding = 1)
+        self.conv2 = Conv2d(in_channels= 16, out_channels= 4, kernel_size= (3,3), padding = 1)
+        self.maxpool = MaxPool2d(2,2)
+
+        self.fc1 = Linear(in_features=3136, out_features= 1500)
+        self.fc2 = Linear(in_features=1500, out_features=500)
+        self.fc3 = Linear(in_features=500, out_features=100)
+        self.fc4 = Linear(in_features=100,out_features=1)
+
+
+        # Decoder
+        self.fc4_d = Linear(in_features=1, out_features=100)
+        self.fc3_d = Linear(in_features=100, out_features=500)
+        self.fc2_d = Linear(in_features=500,out_features=1500)
+        self.fc1_d = Linear(in_features=1500,out_features=3136)
+        self.conv2_d = ConvTranspose2d(in_channels = 4, out_channels= 16, kernel_size= (2,2), stride = 2)
+        self.conv1_d = ConvTranspose2d(in_channels = 16, out_channels= 3, kernel_size= (2,2), stride = 2)
+
+
+        """
         self.conv1 = Conv2d(in_channels=n_channels_cnn, out_channels=5,kernel_size=(5, 5),stride=1)
         
         # stride of 1 , thus 224-5+1 = 220 resulting size (220x220)
@@ -64,7 +92,7 @@ class CCA(torch.nn.Module):
 
         self.maxpool1_d = Upsample(scale_factor=2,mode='bilinear')
         self.conv1_d = ConvTranspose2d(in_channels=5, out_channels=n_channels_cnn, kernel_size=(5,5),stride=1)
-
+        """
        
 
 
@@ -82,6 +110,44 @@ class CCA(torch.nn.Module):
         pass
         
     def nn_forward_pass(self,x):
+
+        x_flattened = 1
+        x_bottleneck = 1
+        # 224x224
+        x = F.relu(self.conv1(x))
+        # 224x224
+        x = self.maxpool(x)
+        # 112x112
+        x = F.relu(self.conv2(x))
+        # 112x112
+        x = self.maxpool(x)
+        # 56 x 56
+        """
+        x, x_flattened = flatten(x,start_dim=1), flatten(x,start_dim=1)
+
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = F.relu(self.fc3(x))
+        x, x_bottleneck = F.relu(self.fc4(x)), F.relu(self.fc4(x))
+        x = F.relu(self.fc4_d(x))
+        x = F.relu(self.fc3_d(x))
+        x = F.relu(self.fc2_d(x))
+        x = F.relu(self.fc1_d(x))
+
+
+        x_size = int(sqrt(x.size(dim=1))) 
+        # Reshape into img form
+        # Get size of curr batch
+        curr_batch_size = x.size(dim=0)
+        x = x.reshape([curr_batch_size,1,x_size,x_size])
+        """
+        # 56 x 56
+        x = F.relu(self.conv2_d(x))
+        # 112 x 112
+        x = F.sigmoid(self.conv1_d(x))
+        # 224 x 224
+
+        """
         x = F.relu(self.conv1(x))
         x = self.maxpool1(x)
 
@@ -117,30 +183,28 @@ class CCA(torch.nn.Module):
 
         assert(x.size(dim=1) == self.n_channels_cnn 
                and x.size(dim=2) == 224 and x.size(dim=3) == 224) , "wrong sizes"
-
+        """
         return x, x_flattened, x_bottleneck
         
 
 
 class PatchesDataset(Dataset):
     def __init__(self):
-        self.img_path = 'TCGA-05-4249-01Z-00-DX1.9fce0297-cc19-4c04-872c-4466ee4024db.svs_mpp-0.5_crop47-90_files/1' # TODO : change to 0 for real program
+        self.img_path = 'Slides/slide_data/sample2/p2_slide.svs_mpp-0.5_crop47-13_files/1'
         # Store imgs here
         self.data = []
         directory = os.fsencode(self.img_path)
         for patch in os.listdir(directory):
             absolute_path = self.img_path + '/' + os.fsdecode(patch)
-            pixel_vals = torch.tensor(Image.open(absolute_path).getdata())
 
-            # Assign RGB channels
-            channel_R = pixel_vals[:,0]
-            channel_G = pixel_vals[:,1]
-            channel_B = pixel_vals[:,2]
 
-                
-            img = torch.stack((channel_R.reshape(224,224),channel_G.reshape(224,224),channel_B.reshape(224,224)),dim=0)
+            img_tensor = read_image(path=absolute_path)
+            # Can show tensor with this directly
+   #         img_show = T.ToPILImage()(img_tensor)
+   #         img_show.show()
 
-            self.data.append(img)
+
+            self.data.append(img_tensor)
 
     def __len__(self):
         # Amount of patches
@@ -162,19 +226,29 @@ def training_loop(batch_size,epochs):
     train_loss = []
     EPOCHS = epochs
     MODEL = CCA(n_channels_cnn=3)
-    OPTIMIZER = SGD(MODEL.parameters(), lr=0.001, momentum=0.9)
+   # OPTIMIZER = SGD(MODEL.parameters(), lr=0.001, momentum=0.9)
     LOSS_FUNC = MSELoss()
+
+    #Loss function
+ #   LOSS_FUNC = BCELoss()
+
+    #Optimizer
+    OPTIMIZER = Adam(MODEL.parameters(), lr=0.0001)      
     
 
     dataset = PatchesDataset()
-    data_loader = DataLoader(dataset,batch_size=batch_size,shuffle=True)
+    data_loader = DataLoader(dataset,batch_size=batch_size,shuffle=False) # TODO : shuffle True
 
     for i in range(EPOCHS):
         for c, data in enumerate(data_loader):
 
+
+            # normalize images
+            data = data/255
             data = data.type(torch.FloatTensor)
-            
-            decoded_output, bottleneck_value = MODEL.nn_forward_pass(data)
+
+
+            decoded_output, flattened, bottleneck_value = MODEL.nn_forward_pass(data)
             loss = LOSS_FUNC(data,decoded_output)
 
             train_loss.append(float(loss))
@@ -184,11 +258,35 @@ def training_loop(batch_size,epochs):
             OPTIMIZER.step()
 
             print(f'epoch {i} step {c} loss {loss}')
+    # Plot final loss after last epoch
+    
+            if i == EPOCHS - 1:
+               
+                
+                og_data_d_copy = data[3,:,:,:].clone().detach() 
+                    
+                decoded_output_d_copy = decoded_output[3,:,:,:].clone().detach()
+                tensor_to_image(decoded_output_d_copy)
+                tensor_to_image(og_data_d_copy)
+                break
+
+    plt.plot(train_loss, label='train_loss')
+    plt.legend()
+    plt.show()
 
 
 
             
-
+def tensor_to_image(tensor):
+    tensor = (tensor*255)
+  #  if np.ndim(tensor)>3:
+  #      assert tensor.shape[0] == 1
+  #      tensor = tensor[0]
+    # Rearrange
+    patch_visualization = T.ToPILImage()(tensor)
+    patch_visualization.show()
+   
+ 
 
 
 
@@ -236,7 +334,7 @@ if __name__ == '__main__':
 
     """
 
-    training_loop(5,10)
+    training_loop(16,400)
 
     
 
