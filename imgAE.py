@@ -24,6 +24,12 @@ from matplotlib import pyplot as plt
 import numpy as np 
 import PIL
 from torchvision.io import read_image
+import lightning.pytorch as pl
+import torchvision
+import cifar10
+import pandas as pd 
+from torch import nn, optim, utils, Tensor
+
 
 
 class CCA(torch.nn.Module):
@@ -36,157 +42,120 @@ class CCA(torch.nn.Module):
  
         self.n_channels_cnn = n_channels_cnn
         self.model_parameter = ParameterList()
+        self.encoder = nn.Sequential(
+                         nn.Conv2d(in_channels= 3, out_channels= 10, kernel_size= (5,5)),
+                         nn.ReLU(),
+                         nn.MaxPool2d(kernel_size=(2,2)),
+                         nn.Conv2d(in_channels= 10, out_channels = 2, kernel_size= (5,5)),
+                         nn.ReLU(),
+                         nn.MaxPool2d(kernel_size=(2,2)),
+                         nn.Flatten(start_dim= 1),
+                         nn.Linear(2 * 53 * 53, 1500),
+                         nn.ReLU(),
+                         nn.Linear(1500,128),
+                         nn.ReLU(),
+                         nn.Linear(128,64),
+                         nn.Linear(64,2),
+              
+              )
 
-        # CNN structure
-        # Encoder
-        # img size 224x 224
-        # we use padding so we keep the picture size : only reduce with max pool operations 
-        self.conv1 = Conv2d(in_channels=n_channels_cnn,out_channels=16,kernel_size=(3,3), padding = 1)
-        self.conv2 = Conv2d(in_channels= 16, out_channels= 4, kernel_size= (3,3), padding = 1)
-        self.maxpool = MaxPool2d(2,2)
-
-        self.fc1 = Linear(in_features=3136, out_features= 1500)
-        self.fc2 = Linear(in_features=1500, out_features=500)
-        self.fc3 = Linear(in_features=500, out_features=100)
-        self.fc4 = Linear(in_features=100,out_features=1)
-
-
-        # Decoder
-        self.fc4_d = Linear(in_features=1, out_features=100)
-        self.fc3_d = Linear(in_features=100, out_features=500)
-        self.fc2_d = Linear(in_features=500,out_features=1500)
-        self.fc1_d = Linear(in_features=1500,out_features=3136)
-        self.conv2_d = ConvTranspose2d(in_channels = 4, out_channels= 16, kernel_size= (2,2), stride = 2)
-        self.conv1_d = ConvTranspose2d(in_channels = 16, out_channels= 3, kernel_size= (2,2), stride = 2)
-
-
-        """
-        self.conv1 = Conv2d(in_channels=n_channels_cnn, out_channels=5,kernel_size=(5, 5),stride=1)
+        self.decoder = nn.Sequential(
+                      
+                        nn.Linear(1,64),
+                        nn.Linear(64,128),
+                        nn.ReLU(),
+                        nn.Linear(128,1500),
+                        nn.ReLU(),
+                        nn.Linear(1500, 2 * 53 * 53),
+                        nn.Unflatten(dim = 1, unflattened_size= torch.Size([2,53,53])),
+                        nn.Upsample(scale_factor=2, mode='bilinear'),
+                        nn.ReLU(),
+                        nn.ConvTranspose2d(in_channels= 2, out_channels= 10, kernel_size= (5,5)),
+                        nn.Upsample(scale_factor=2, mode='bilinear'),
+                        nn.ReLU(),
+                        nn.ConvTranspose2d(in_channels=10, out_channels=3, kernel_size = (5,5))
+                        )
         
-        # stride of 1 , thus 224-5+1 = 220 resulting size (220x220)
-        self.maxpool1 = MaxPool2d(kernel_size=(2, 2), stride=2)
-        # 220:2 = 110 , resulting image (110x110)
-
-        self.conv2 = Conv2d(in_channels=5, out_channels=1,kernel_size=(5, 5),stride=1)
-        # 110-5+1 = 106 , 106x106
-        self.maxpool2 = MaxPool2d(kernel_size=(2,2),stride=2)
-        # 106:2 , 53x53
-
-
-        # 1 x 53 x 53
-        self.fc1 = Linear(in_features=2809, out_features=400)
-        self.fc2 = Linear(in_features=400, out_features=100)
-
-        # canonical variable
-        self.fc3 = Linear(in_features=100, out_features=1)
-
-        # Decoder
-        self.fc3_d = Linear(in_features=1, out_features=100)
-        self.fc2_d = Linear(in_features=100, out_features=400)
-        self.fc1_d = Linear(in_features=400, out_features=2809)
-
-
-
-        self.maxpool2_d = Upsample(scale_factor=2,mode='bilinear')
-        self.conv2_d = ConvTranspose2d(in_channels=1, out_channels=5, kernel_size=(5,5), stride=1)
-
-        self.maxpool1_d = Upsample(scale_factor=2,mode='bilinear')
-        self.conv1_d = ConvTranspose2d(in_channels=5, out_channels=n_channels_cnn, kernel_size=(5,5),stride=1)
-        """
-       
-
-
+        self.encoder_conv_to_flat = nn.Sequential(nn.Conv2d(in_channels= 3, out_channels= 10, kernel_size= (5,5)),
+                         nn.ReLU(),
+                         nn.MaxPool2d(kernel_size=(2,2)),
+                         nn.Conv2d(in_channels= 10, out_channels = 2, kernel_size= (5,5)),
+                         nn.ReLU(),
+                         nn.MaxPool2d(kernel_size=(2,2)),
+                         nn.Flatten(start_dim= 1))
         
-        #TODO: pytorch only offers pseudo inverse of maxpooling (all non maximum values just set to 0 --> huge loss of data? 
-        # ReLU activation won't affect these values anymore and they will stay 0) // use upsamling instead --> we can still have
-        # learning effect here?
-        #TODO : Later on, in the CCA structure, don't use encoder/decoder structure for the CNN-AE, use augmentation method CNN to find vector representation
+        self.encoder_flat_to_canonical_var = nn.Sequential(nn.Linear(2 * 53 * 53, 1500),
+                         nn.ReLU(),
+                         nn.Linear(1500,128),
+                         nn.ReLU(),
+                         nn.Linear(128,64),
+                         nn.Linear(64,1)
+                    )
 
 
-    def nn_structure(self):
-        """AE structures with reconstruction loss on decoder and 
-           CCA loss (maximizing correlation between numerical & imaging)
-           on bottleneck"""
-        pass
+
+    def forward(self,x):
+        x_original = x
+        flat = self.encoder_conv_to_flat(x_original)
+        canonical = self.encoder_flat_to_canonical_var(flat)
+        x_hat = self.decoder(canonical)
+
+        return x_hat, flat, canonical 
+
+
+    def training_step(self, batch):
+        # training_step defines the train loop.
+        # it is independent of forward
+        x = batch
+        # normalize
+        x_original = x / 255
+        # size : batch x channels x width x height
+
+      #  x_original = x.view(x.size(0), -1)
+
+        flat = self.encoder_conv_to_flat(x_original)
+        canonical = self.encoder_flat_to_canonical_var(flat)
+        x_hat = self.decoder(canonical)
+
+     #   z = self.encoder(x_original)
+     #   x_hat = self.decoder(z)
+        loss = nn.functional.mse_loss(x_hat, x_original)
+        # Logging to TensorBoard (if installed) by default
+        self.log("train_loss", loss, prog_bar=True, on_step=False, on_epoch=True)
+        return loss # TODO : dict
+    #    return x_hat
+
+    def configure_optimizers(self):
+        optimizer = optim.Adam(self.parameters(), lr=0.001)
+        return optimizer
         
-    def nn_forward_pass(self,x):
 
-        x_flattened = 1
-        x_bottleneck = 1
-        # 224x224
-        x = F.relu(self.conv1(x))
-        # 224x224
-        x = self.maxpool(x)
-        # 112x112
-        x = F.relu(self.conv2(x))
-        # 112x112
-        x = self.maxpool(x)
-        # 56 x 56
-        """
-        x, x_flattened = flatten(x,start_dim=1), flatten(x,start_dim=1)
+"""
+class PatchesDatasetTesting(Dataset):
+    def __init__(self) -> None:
+        super().__init__()
+        self.img_paths = ['Slides/slide_data/sample1/p1_slide.svs_mpp-0.5_crop47-90_files/1',
+                    'Slides/slide_data/sample2/p2_slide.svs_mpp-0.5_crop47-13_files/1',
+                    'Slides/slide_data/sample3/p3_slide.svs_mpp-0.5_crop21-98_files/1']
+        
+        self.images = [[] for i in range(len(self.img_paths))]
 
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
-        x, x_bottleneck = F.relu(self.fc4(x)), F.relu(self.fc4(x))
-        x = F.relu(self.fc4_d(x))
-        x = F.relu(self.fc3_d(x))
-        x = F.relu(self.fc2_d(x))
-        x = F.relu(self.fc1_d(x))
+        for c,img_path in enumerate(self.img_paths):
+            directory = os.fsencode(img_path)
+            for patch in os.listdir(directory):
+                absolute_path = img_path + '/' + os.fsdecode(patch)
+                img_tensor = read_image(path=absolute_path)
 
-
-        x_size = int(sqrt(x.size(dim=1))) 
-        # Reshape into img form
-        # Get size of curr batch
-        curr_batch_size = x.size(dim=0)
-        x = x.reshape([curr_batch_size,1,x_size,x_size])
-        """
-        # 56 x 56
-        x = F.relu(self.conv2_d(x))
-        # 112 x 112
-        x = F.sigmoid(self.conv1_d(x))
-        # 224 x 224
-
-        """
-        x = F.relu(self.conv1(x))
-        x = self.maxpool1(x)
-
-        x = F.relu(self.conv2(x))
-        x = self.maxpool2(x)
-
-        # Flatten every dimension but batch
-        x, x_flattened = flatten(x,start_dim=1), flatten(x,start_dim=1)
-
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        # no activation
-        x, x_bottleneck = self.fc3(x), self.fc3(x)
-
-        x = self.fc3_d(x)
-        x = F.relu(self.fc2_d(x))
-        x = F.relu(self.fc1_d(x))
+                self.images[c].append(img_tensor)
+        
+    def __len__(self):
+        # Return amount of samples
+        return len(self.images)
     
+    def __getitem__(self,idx):
 
-        x_size = int(sqrt(x.size(dim=1))) 
-
-        # Reshape into img form
-
-        # Get size of curr batch
-        curr_batch_size = x.size(dim=0)
-        x = x.reshape([curr_batch_size,1,x_size,x_size])
-
-        x = self.maxpool2_d(x)
-        x = F.relu(self.conv2_d(x))
-
-        x = self.maxpool1_d(x)
-        x = F.relu(self.conv1_d(x))
-
-        assert(x.size(dim=1) == self.n_channels_cnn 
-               and x.size(dim=2) == 224 and x.size(dim=3) == 224) , "wrong sizes"
-        """
-        return x, x_flattened, x_bottleneck
-        
-
+        return torch.stack((self.images[0][idx], self.images[1][idx], self.images[2][idx]), dim=0)
+            
 
 class PatchesDataset(Dataset):
     def __init__(self):
@@ -216,9 +185,25 @@ class PatchesDataset(Dataset):
         return img
 
 
+class cifar10dataset(Dataset):
+    def __init__(self) -> None:
+        super().__init__()
+        self.data = []
+        for c,data in enumerate(cifar10.data_batch_generator()):
+            if c == 500: # Testing with 500 from cifar10 ; 32x32 images
+                break
+            else:
+                img_tensor = torch.tensor(data[0]).permute(2,0,1) # Just taking images, no labels
+                self.data.append(img_tensor)
 
-
-            
+    def __len__(self):
+        return len(self.data)
+    
+    def __getitem__(self, idx):
+        img = self.data[idx]
+        return img 
+"""
+    
 
 
 
@@ -226,49 +211,83 @@ def training_loop(batch_size,epochs):
     train_loss = []
     EPOCHS = epochs
     MODEL = CCA(n_channels_cnn=3)
-   # OPTIMIZER = SGD(MODEL.parameters(), lr=0.001, momentum=0.9)
     LOSS_FUNC = MSELoss()
-
-    #Loss function
- #   LOSS_FUNC = BCELoss()
-
     #Optimizer
-    OPTIMIZER = Adam(MODEL.parameters(), lr=0.0001)      
+    OPTIMIZER = Adam(MODEL.parameters(), lr=0.001)      
+    
+   # dataset = cifar10dataset()
+   # data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+ #   dataset = PatchesDatasetTesting()
+ #   data_loader = DataLoader(dataset,batch_size=batch_size,shuffle=True) 
+
+
+
+    img_paths = ['Slides/slide_data/sample_n_6/p6_slide_imgs/1',
+            'Slides/slide_data/sample_n_7/p7_slide_imgs/1',
+            'Slides/slide_data/sample_n_8/p8_slide_imgs/1',
+            'Slides/slide_data/sample_n_9/p9_slide_imgs/1',
+            'Slides/slide_data/sample_n_10/p10_slide_imgs/1']
     
 
-    dataset = PatchesDataset()
-    data_loader = DataLoader(dataset,batch_size=batch_size,shuffle=False) # TODO : shuffle True
+
+    
+    images = [[] for i in range(len(img_paths))]
+
+    for c,img_path in enumerate(img_paths):
+        directory = os.fsencode(img_path)
+        for patch in os.listdir(directory):
+            absolute_path = img_path + '/' + os.fsdecode(patch)
+            img_tensor = read_image(path=absolute_path)
+
+            images[c].append(img_tensor)
+
+
+
 
     for i in range(EPOCHS):
-        for c, data in enumerate(data_loader):
+      #  for c, data in enumerate(data_loader):
+      for n_patch in range(len(images[0])):
+            data = torch.stack((images[0][n_patch],images[1][n_patch],images[2][n_patch]),dim=0)
 
-
+        
             # normalize images
             data = data/255
             data = data.type(torch.FloatTensor)
-
-
-            decoded_output, flattened, bottleneck_value = MODEL.nn_forward_pass(data)
-            loss = LOSS_FUNC(data,decoded_output)
-
+            
+            x_hat, flat, canonical = MODEL.forward(data)
+            loss = LOSS_FUNC(data,x_hat)
+           # loss = loss.type(torch.FloatTensor)
             train_loss.append(float(loss))
 
             OPTIMIZER.zero_grad()
             loss.backward()
             OPTIMIZER.step()
 
-            print(f'epoch {i} step {c} loss {loss}')
-    # Plot final loss after last epoch
+         #   print(f'epoch {i} step {c} loss {loss}')
+            print(f'epoch {i} step {n_patch} loss {loss}')
+             # Plot final loss after last epoch
     
             if i == EPOCHS - 1:
-               
-                
-                og_data_d_copy = data[3,:,:,:].clone().detach() 
-                    
-                decoded_output_d_copy = decoded_output[3,:,:,:].clone().detach()
-                tensor_to_image(decoded_output_d_copy)
-                tensor_to_image(og_data_d_copy)
+              #  for idx, data in enumerate(data_loader):
+                og_images = [(data[idx, : ]) * 255 for idx in range(batch_size)]
+                    # Take first batch for testing purposes
+              #      og_images = list(data.unbind(dim=0))
+              #      data = data / 255
+                #  data = data.view(data.size(0),-1)
+                recon_images = MODEL.decoder(MODEL.encoder_flat_to_canonical_var(MODEL.encoder_conv_to_flat(data)))
+                recon_images = [(recon_images[idx, :]) * 255 for idx in range(batch_size)]
+            # recon_images = [(recon_images[idx, :].reshape(3,32,32)) * 255 for idx in range(batch_size)]
+                img_grid = torchvision.utils.make_grid(torch.stack(og_images + recon_images, dim=0), nrow=4, normalize=True, pad_value=0.5)
+
+                img_grid = img_grid.permute(1, 2, 0)
+                plt.figure(figsize=(3,3))
+                plt.title("Reconstruction examples on MNIST")
+                plt.imshow(img_grid)
+                plt.axis("off")
+                plt.show()
+            #  plt.close()
                 break
+
 
     plt.plot(train_loss, label='train_loss')
     plt.legend()
@@ -289,52 +308,10 @@ def tensor_to_image(tensor):
  
 
 
-
-
-
 if __name__ == '__main__':
-    # if, for instance, CMU-1.svs is in your current directory ("."):
-  #  slides = pp.list_slides("./Slides")
-  #  pp.save_slides_mpp_otsu(slides, "slides_mpp_otsu.csv")
-
-    # this may take a few minutes (depending on your local machine, of course)
-  #  pp.run_tiling("slides_mpp_otsu.csv", "tiles.csv")
-
-  #  pp.calculate_filters("slides_mpp_otsu.csv", "", "tiles_filters.csv")
 
 
-    """
-    example_patch_1 = Image.open('TCGA-05-4249-01Z-00-DX1.9fce0297-cc19-4c04-872c-4466ee4024db.svs_mpp-0.5_crop47-90_files/0/17_32.png')
-    example_patch_2 = Image.open('TCGA-05-4249-01Z-00-DX1.9fce0297-cc19-4c04-872c-4466ee4024db.svs_mpp-0.5_crop47-90_files/0/0_24.png')
-
-    pixel_vals_1 = torch.tensor(example_patch_1.getdata())
-    pixel_vals_2 = torch.tensor(example_patch_2.getdata())
-
-
-
-
-    # Assign RGB channels
-    channel_R_1 = pixel_vals_1[:,0]
-    channel_G_1 = pixel_vals_1[:,1]
-    channel_B_1 = pixel_vals_1[:,2]
-
-    img_1 = torch.stack((channel_R_1.reshape(224,224),channel_G_1.reshape(224,224),channel_B_1.reshape(224,224)),dim=0)
-
-
-    # Assign RGB channels
-    channel_R_2 = pixel_vals_2[:,0]
-    channel_G_2 = pixel_vals_2[:,1]
-    channel_B_2 = pixel_vals_2[:,2]
-
-    img_2 = torch.stack((channel_R_2.reshape(224,224),channel_G_2.reshape(224,224),channel_B_2.reshape(224,224)),dim=0)
-
-
-    # Set as batch
-    img = torch.stack((img_1,img_2), dim=0)
-
-    """
-
-    training_loop(16,400)
+    training_loop(1,600)
 
     
 

@@ -9,6 +9,7 @@ import numpy as np
 import PIL
 from PIL import Image
 from matplotlib import pyplot as plt
+from torch import nn
 
 
 
@@ -21,19 +22,41 @@ class decodernumAE(torch.nn.Module):
         super().__init__(*args, **kwargs)
         self.n_channels_cnn = n_channels_cnn
 
-        # Input will be vector of size 2809
+        self.part_of_decoder = nn.Sequential(
+                        nn.Unflatten(dim = 1, unflattened_size= torch.Size([2,53,53])),
+                        nn.Upsample(scale_factor=2, mode='bilinear'),
+                        nn.ReLU(),
+                        nn.ConvTranspose2d(in_channels= 2, out_channels= 10, kernel_size= (5,5)),
+                        nn.Upsample(scale_factor=2, mode='bilinear'),
+                        nn.ReLU(),
+                        nn.ConvTranspose2d(in_channels=10, out_channels=3, kernel_size = (5,5))
+        )
 
-        self.maxpool2_d = Upsample(scale_factor=2,mode='bilinear')
-        self.conv2_d = ConvTranspose2d(in_channels=1, out_channels=5, kernel_size=(5,5), stride=1)
+        # Input will be vector of size 1500
 
-        self.maxpool1_d = Upsample(scale_factor=2,mode='bilinear')
-        self.conv1_d = ConvTranspose2d(in_channels=5, out_channels=n_channels_cnn, kernel_size=(5,5),stride=1)
+     #   self.maxpool2_d = Upsample(scale_factor=2,mode='bilinear')
+     #   self.conv2_d = ConvTranspose2d(in_channels=1, out_channels=5, kernel_size=(5,5), stride=1)
 
+     #   self.maxpool1_d = Upsample(scale_factor=2,mode='bilinear')
+     #   self.conv1_d = ConvTranspose2d(in_channels=5, out_channels=n_channels_cnn, kernel_size=(5,5),stride=1)
+
+
+
+    def forward(self,x, att_weights):
+
+
+        x = self.part_of_decoder(x)
+        att_weights = self.part_of_decoder(att_weights)
+
+        return x, att_weights
+
+
+    """
     def nn_forward_pass(self,x, attention_weights):
-        """
-        x : first flattened vector (after last pooling operation) in imgAE
+
+       # x : first flattened vector (after last pooling operation) in imgAE
         
-        """
+ 
 
         # Convert to double (needed for conv layers)
         x = x.float()
@@ -97,7 +120,7 @@ class decodernumAE(torch.nn.Module):
                and x.size(dim=2) == 224 and x.size(dim=3) == 224) , "wrong sizes"
 
         return x, new_attention_weights
-
+    """
 
 
 def attention_weights(rna_feature_idx,rna_loadings, correlations, patches_loadings):
@@ -125,13 +148,13 @@ def attention_weights(rna_feature_idx,rna_loadings, correlations, patches_loadin
         patches_loadings_tensors.append(torch.tensor(patches_loadings_df['0'].values))
 
     # Store attention weights for each patch
-    patch_attention_weights = [torch.empty(size=(patches_loadings_tensors[0].size(dim=0),1)) for _ in range(len(patches_loadings_tensors))]
+    patch_attention_weights = [torch.empty(size=(1,patches_loadings_tensors[0].size(dim=0))) for _ in range(len(patches_loadings_tensors))]
     
   
     for patch_idx, patch in enumerate(patches_loadings_tensors):
         for patch_loading_idx in range(patch.size(dim=0)):
             attention_w = rna_feature_loading * correlations_tensor[patch_idx] * patches_loadings_tensors[patch_idx][patch_loading_idx]
-            patch_attention_weights[patch_idx][patch_loading_idx] = attention_w
+            patch_attention_weights[patch_idx][:,patch_loading_idx] = attention_w
 
     return patch_attention_weights
     
@@ -168,7 +191,7 @@ if __name__ == '__main__':
     # take first patch (first column)
     # Get into right structure (batch_size, features)
     flattened_vector_patch_0 = torch.tensor(flattened_vectors_from_patches_df['patch_0']).unsqueeze(dim=0)
-    attention_weights_patch_0 = patch_attention_weights[0].squeeze(dim=1).unsqueeze(dim=0)
+    attention_weights_patch_0 = patch_attention_weights[0]
 
     pre_model = torch.load(PATH)
     # Pretrained state dict (weights & biases)
@@ -184,7 +207,7 @@ if __name__ == '__main__':
 
     model.load_state_dict(model_dict)
 
-    img_patch, attention_patch = model.nn_forward_pass(flattened_vector_patch_0, attention_weights_patch_0)
+    img_patch, attention_patch = model.forward(flattened_vector_patch_0, attention_weights_patch_0)
 
     img_patch_show = tensor_to_image(attention_patch)
 
