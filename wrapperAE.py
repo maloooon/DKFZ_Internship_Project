@@ -17,7 +17,7 @@ import math
 from torch.optim import Adam
 from torchvision.io import read_image
 import HelperFunctions as HF
-
+from torch.nn import CosineSimilarity
 
 class fullDataset(Dataset):
     def __init__(self) -> None:
@@ -553,6 +553,8 @@ def training_loop(batch_size,epochs):
                 n_canonical_variables = bottleneck_value_num.size(dim=1)
                 # corr_matrix (row : rna values, column : img values)
                 corr_matrix = torch.empty(size=(n_canonical_variables,n_canonical_variables))
+                # Replacement for pearson
+                cos = CosineSimilarity(dim=0, eps=1e-6)
 
 
 
@@ -562,7 +564,10 @@ def training_loop(batch_size,epochs):
 
                 if n_canonical_variables > 1:
                     for idx_pair, pair in enumerate(itertools.product(bottleneck_value_img.clone().detach().unbind(dim=1), bottleneck_value_num.clone().detach().unbind(dim=1))):
-                        corr_matrix[idx,counter_img] = pearson(pair[0].clone().detach(),pair[1].clone().detach())
+                        img_c = pair[0].clone().detach()
+                        num_c = pair[1].clone().detach()
+                        corr_matrix[idx, counter_img] = cos(img_c - img_c.mean(dim=0,keepdim=True), num_c - num_c.mean(dim=0,keepdim=True))
+                       # corr_matrix[idx,counter_img] = pearson(pair[0].clone().detach(),pair[1].clone().detach())
                         if idx % (n_canonical_variables - 1) == 0 and idx != 0:
                             idx = 0
                             counter_img += 1
@@ -584,7 +589,11 @@ def training_loop(batch_size,epochs):
                     # TODO : smth more sophisticated ?
                     loss_correlation = torch.mean(corr_matrix)
                 else:
-                    loss_correlation = pearson(bottleneck_value_img.clone().detach().squeeze(dim=1), bottleneck_value_num.clone().detach().squeeze(dim=1))
+                    img_c = bottleneck_value_img.clone().detach().squeeze(dim=1)
+                    num_c = bottleneck_value_num.clone().detach().squeeze(dim=1)
+                    
+                    loss_correlation = cos(img_c - img_c.mean(dim=0,keepdim=True), num_c - num_c.mean(dim=0,keepdim=True))
+                  #  loss_correlation = pearson(bottleneck_value_img.clone().detach().squeeze(dim=1), bottleneck_value_num.clone().detach().squeeze(dim=1))
 
             #    correlations.append(loss_correlation.clone().detach())
 
@@ -596,9 +605,9 @@ def training_loop(batch_size,epochs):
                 loss_correlation_d_copy = loss_correlation.clone().detach()
              #   correlations[substep] = loss_correlation_d_copy
 
-                alpha = 0.3 # same samples during substeps --> learns fast
-                beta = 0.3
-                gamma = 0.4
+                alpha = 0.10 # same samples during substeps --> learns fast
+                beta = 0.10
+                gamma = 0.8
                 full_loss = alpha * loss_reconstruction_num + beta * loss_reconstruction_img + gamma * - loss_correlation
                 train_loss.append(float(full_loss))
                 train_loss_reconstruction_rna.append(float(loss_reconstruction_num))
@@ -718,7 +727,7 @@ def tensor_to_image(tensor):
 
 
 if __name__ == '__main__':
-    training_loop(4,100)
+    training_loop(8,10)
    # train_test_loop(1,600)
   #   train_old_data(32,200)
    
