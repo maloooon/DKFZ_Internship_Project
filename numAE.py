@@ -17,6 +17,7 @@ class numAE(torch.nn.Module):
     def __init__(self, in_size, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.in_size = in_size 
+        
 
 
         self.encoder = nn.Sequential(
