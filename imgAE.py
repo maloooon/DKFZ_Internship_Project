@@ -1,5 +1,5 @@
 import os 
-import wsi_preprocessing as pp
+#import wsi_preprocessing as pp
 import torch
 from torch.nn import Conv2d
 from torch.nn import Linear
@@ -24,9 +24,9 @@ from matplotlib import pyplot as plt
 import numpy as np 
 import PIL
 from torchvision.io import read_image
-import lightning.pytorch as pl
+#import lightning.pytorch as pl
 import torchvision
-import cifar10
+#import cifar10
 import pandas as pd 
 from torch import nn, optim, utils, Tensor
 
@@ -42,26 +42,26 @@ class CCA(torch.nn.Module):
  
         self.n_channels_cnn = n_channels_cnn
         self.model_parameter = ParameterList()
-        self.encoder = nn.Sequential(
-                         nn.Conv2d(in_channels= 3, out_channels= 10, kernel_size= (5,5)),
-                         nn.ReLU(),
-                         nn.MaxPool2d(kernel_size=(2,2)),
-                         nn.Conv2d(in_channels= 10, out_channels = 2, kernel_size= (5,5)),
-                         nn.ReLU(),
-                         nn.MaxPool2d(kernel_size=(2,2)),
-                         nn.Flatten(start_dim= 1),
-                         nn.Linear(2 * 53 * 53, 1500),
-                         nn.ReLU(),
-                         nn.Linear(1500,128),
-                         nn.ReLU(),
-                         nn.Linear(128,64),
-                         nn.Linear(64,2),
+     #   self.encoder = nn.Sequential(
+     #                    nn.Conv2d(in_channels= 3, out_channels= 10, kernel_size= (5,5)),
+     #                    nn.ReLU(),
+     #                    nn.MaxPool2d(kernel_size=(2,2)),
+     #                    nn.Conv2d(in_channels= 10, out_channels = 2, kernel_size= (5,5)),
+     #                    nn.ReLU(),
+     #                    nn.MaxPool2d(kernel_size=(2,2)),
+     #                    nn.Flatten(start_dim= 1),
+     #                    nn.Linear(2 * 53 * 53, 1500),
+     #                    nn.ReLU(),
+     #                    nn.Linear(1500,128),
+      #                   nn.ReLU(),
+      #                   nn.Linear(128,64),
+     #                    nn.Linear(64,2),
               
-              )
+      #        )
 
         self.decoder = nn.Sequential(
                       
-                        nn.Linear(1,64),
+                        nn.Linear(16,64),
                         nn.Linear(64,128),
                         nn.ReLU(),
                         nn.Linear(128,1500),
@@ -89,7 +89,7 @@ class CCA(torch.nn.Module):
                          nn.Linear(1500,128),
                          nn.ReLU(),
                          nn.Linear(128,64),
-                         nn.Linear(64,1)
+                         nn.Linear(64,16)
                     )
 
 
@@ -112,18 +112,14 @@ class CCA(torch.nn.Module):
         # size : batch x channels x width x height
 
       #  x_original = x.view(x.size(0), -1)
-
         flat = self.encoder_conv_to_flat(x_original)
         canonical = self.encoder_flat_to_canonical_var(flat)
         x_hat = self.decoder(canonical)
 
-     #   z = self.encoder(x_original)
-     #   x_hat = self.decoder(z)
         loss = nn.functional.mse_loss(x_hat, x_original)
-        # Logging to TensorBoard (if installed) by default
         self.log("train_loss", loss, prog_bar=True, on_step=False, on_epoch=True)
-        return loss # TODO : dict
-    #    return x_hat
+        return loss 
+
 
     def configure_optimizers(self):
         optimizer = optim.Adam(self.parameters(), lr=0.001)

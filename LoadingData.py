@@ -68,6 +68,7 @@ while rna_numpy.shape[1] > 2000:
     threshold += 0.01
 
 
+print(rna_numpy.shape[1])
 rna_df = pd.DataFrame(rna_numpy).fillna(0)
 
 

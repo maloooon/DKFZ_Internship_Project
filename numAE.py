@@ -23,18 +23,16 @@ class numAE(torch.nn.Module):
         self.encoder = nn.Sequential(
             nn.Linear(self.in_size,250),
             nn.ReLU(),
-            nn.Linear(250,64),
-          #  nn.ReLU(),
-            nn.Linear(64,2),
-           # nn.Linear(16,8)
+            nn.Linear(250,125),
+            nn.Linear(125,16),
+            
         )
 
 
         self.decoder = nn.Sequential(
-           # nn.Linear(8,16),
-            nn.Linear(2,64),
-           # nn.ReLU(),
-            nn.Linear(64,250),
+           
+            nn.Linear(16,125),
+            nn.Linear(125,250),
             nn.ReLU(),
             nn.Linear(250,self.in_size)
         )
@@ -86,7 +84,7 @@ def training_loop(epochs,batch_size):
 
 
     MODEL = numAE(in_size=dataset.__numfeats__())
-    OPTIMIZER = Adam(MODEL.parameters(), lr= 0.001)
+    OPTIMIZER = Adam(MODEL.parameters(), lr= 0.00001)
     for epoch in range(EPOCHS):
         for c, data in enumerate(data_loader):
 
@@ -109,12 +107,13 @@ def training_loop(epochs,batch_size):
     
     plt.plot(train_loss, label='train_loss')
     plt.legend()
-    plt.show()
+  #  plt.show()
+    plt.savefig('CCA-Project/training_onlynum.png')
 
     
 
 if __name__ == '__main__':
-    training_loop(200,8)
+    training_loop(3000,16)
 
 
 
