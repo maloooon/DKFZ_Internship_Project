@@ -29,6 +29,7 @@ import torchvision
 #import cifar10
 import pandas as pd 
 from torch import nn, optim, utils, Tensor
+import HelperFunctions as HF
 
 
 
@@ -59,14 +60,16 @@ class CCA(torch.nn.Module):
               
       #        )
 
-        self.decoder = nn.Sequential(
+        self.decoder_1 = nn.Sequential(
                       
-                        nn.Linear(16,64),
+                        nn.Linear(32,64),
                         nn.Linear(64,128),
                         nn.ReLU(),
                         nn.Linear(128,1500),
                         nn.ReLU(),
-                        nn.Linear(1500, 2 * 53 * 53),
+                        nn.Linear(1500, 2 * 53 * 53))
+        
+        self.decoder_2 = nn.Sequential(
                         nn.Unflatten(dim = 1, unflattened_size= torch.Size([2,53,53])),
                         nn.Upsample(scale_factor=2, mode='bilinear'),
                         nn.ReLU(),
@@ -89,7 +92,8 @@ class CCA(torch.nn.Module):
                          nn.Linear(1500,128),
                          nn.ReLU(),
                          nn.Linear(128,64),
-                         nn.Linear(64,16)
+                         nn.Linear(64,32)
+                         
                     )
 
 
@@ -98,9 +102,10 @@ class CCA(torch.nn.Module):
         x_original = x
         flat = self.encoder_conv_to_flat(x_original)
         canonical = self.encoder_flat_to_canonical_var(flat)
-        x_hat = self.decoder(canonical)
+        x_hat_prev = self.decoder_1(canonical)
+        x_hat = self.decoder_2(x_hat_prev)
 
-        return x_hat, flat, canonical 
+        return x_hat,x_hat_prev, flat, canonical 
 
 
     def training_step(self, batch):
@@ -121,9 +126,9 @@ class CCA(torch.nn.Module):
         return loss 
 
 
-    def configure_optimizers(self):
-        optimizer = optim.Adam(self.parameters(), lr=0.001)
-        return optimizer
+ #   def configure_optimizers(self):
+ #       optimizer = optim.Adam(self.parameters(), lr=0.001)
+ #       return optimizer
         
 
 """
@@ -209,7 +214,7 @@ def training_loop(batch_size,epochs):
     MODEL = CCA(n_channels_cnn=3)
     LOSS_FUNC = MSELoss()
     #Optimizer
-    OPTIMIZER = Adam(MODEL.parameters(), lr=0.001)      
+    OPTIMIZER = Adam(MODEL.parameters(), lr=0.0001)      
     
    # dataset = cifar10dataset()
    # data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
@@ -217,12 +222,26 @@ def training_loop(batch_size,epochs):
  #   data_loader = DataLoader(dataset,batch_size=batch_size,shuffle=True) 
 
 
-
-    img_paths = ['Slides/slide_data/sample_n_6/p6_slide_imgs/1',
-            'Slides/slide_data/sample_n_7/p7_slide_imgs/1',
-            'Slides/slide_data/sample_n_8/p8_slide_imgs/1',
-            'Slides/slide_data/sample_n_9/p9_slide_imgs/1',
-            'Slides/slide_data/sample_n_10/p10_slide_imgs/1']
+    # These two (imgs/2 for img 0 & 1, with just 1 patch ) with just a single patch work on NN (2*53*53,1500)-> ReLU -> (1500->128) -> ReLU -> (128,64) -> (64,32), lr = 0.0001
+    # After about 1200 epochs ; also works for all pictures ! (0 to 18 imgs with 100 patches each, after 400/500 epochs)
+    # Using just the first 3 Steps in NN works too, but takes longer (so reducing dimension helps)
+    img_paths = ['0to128/0/imgs/1',
+                          '0to128/1/imgs/1',
+                          '0to128/2/imgs/1',
+                          '0to128/5/imgs/1',
+                          '0to128/6/imgs/1',
+                          '0to128/7/imgs/1',
+                          '0to128/8/imgs/1',
+                          '0to128/9/imgs/1',
+                          '0to128/10/imgs/1',
+                          '0to128/11/imgs/1',
+                          '0to128/12/imgs/1',
+                          '0to128/13/imgs/1',
+                          '0to128/14/imgs/1',
+                          '0to128/15/imgs/1',
+                          '0to128/16/imgs/1',
+                          '0to128/18/imgs/1']
+           
     
 
 
@@ -233,24 +252,28 @@ def training_loop(batch_size,epochs):
         directory = os.fsencode(img_path)
         for patch in os.listdir(directory):
             absolute_path = img_path + '/' + os.fsdecode(patch)
-            img_tensor = read_image(path=absolute_path)
-
+            try:
+                img_tensor = read_image(path=absolute_path)
+            except RuntimeError:  # finds hidden mac file .ds_store 
+                pass
             images[c].append(img_tensor)
 
 
 
-
+    
     for i in range(EPOCHS):
       #  for c, data in enumerate(data_loader):
-      for n_patch in range(len(images[0])):
-            data = torch.stack((images[0][n_patch],images[1][n_patch],images[2][n_patch]),dim=0)
+        for n_patch in range(len(images[0])):
+            # for first 3 images
+            data = torch.stack((images[0][n_patch],images[1][n_patch]))
+          #  data = torch.stack((images[0][n_patch],images[1][n_patch],images[2][n_patch]),dim=0)
 
         
             # normalize images
             data = data/255
             data = data.type(torch.FloatTensor)
             
-            x_hat, flat, canonical = MODEL.forward(data)
+            x_hat,x_hat_prev, flat, canonical = MODEL.forward(data)
             loss = LOSS_FUNC(data,x_hat)
            # loss = loss.type(torch.FloatTensor)
             train_loss.append(float(loss))
@@ -265,29 +288,35 @@ def training_loop(batch_size,epochs):
     
             if i == EPOCHS - 1:
               #  for idx, data in enumerate(data_loader):
-                og_images = [(data[idx, : ]) * 255 for idx in range(batch_size)]
+                amount_pics = 2
+                og_images = [(data[idx, : ]) * 255 for idx in range(amount_pics)]
                     # Take first batch for testing purposes
               #      og_images = list(data.unbind(dim=0))
               #      data = data / 255
                 #  data = data.view(data.size(0),-1)
                 recon_images = MODEL.decoder(MODEL.encoder_flat_to_canonical_var(MODEL.encoder_conv_to_flat(data)))
-                recon_images = [(recon_images[idx, :]) * 255 for idx in range(batch_size)]
+                recon_images = [(recon_images[idx, :]) * 255 for idx in range(amount_pics)]
             # recon_images = [(recon_images[idx, :].reshape(3,32,32)) * 255 for idx in range(batch_size)]
-                img_grid = torchvision.utils.make_grid(torch.stack(og_images + recon_images, dim=0), nrow=4, normalize=True, pad_value=0.5)
+                img_grid = torchvision.utils.make_grid(torch.stack(og_images + recon_images, dim=0), nrow=3, normalize=True, pad_value=0.5)
 
                 img_grid = img_grid.permute(1, 2, 0)
                 plt.figure(figsize=(3,3))
                 plt.title("Reconstruction examples on MNIST")
                 plt.imshow(img_grid)
                 plt.axis("off")
-                plt.show()
+              #  plt.show()
+                plt.savefig('CCA-Project/img_only.png')
+                plt.clf() # close plot so we don't save the same plot for the train loss (see below)
             #  plt.close()
                 break
 
+        train_loss = HF.avg_per_epoch(train_loss,i)
 
     plt.plot(train_loss, label='train_loss')
+    plt.savefig('CCA-Project/training_img_only')
     plt.legend()
-    plt.show()
+    plt.clf()
+   # plt.show()
 
 
 
@@ -307,7 +336,7 @@ def tensor_to_image(tensor):
 if __name__ == '__main__':
 
 
-    training_loop(1,600)
+    training_loop(1,2000)
 
     
 

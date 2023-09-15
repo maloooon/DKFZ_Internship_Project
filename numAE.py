@@ -24,14 +24,14 @@ class numAE(torch.nn.Module):
             nn.Linear(self.in_size,250),
             nn.ReLU(),
             nn.Linear(250,125),
-            nn.Linear(125,16),
+            nn.Linear(125,64),
             
         )
 
 
         self.decoder = nn.Sequential(
            
-            nn.Linear(16,125),
+            nn.Linear(64,125),
             nn.Linear(125,250),
             nn.ReLU(),
             nn.Linear(250,self.in_size)
@@ -113,7 +113,7 @@ def training_loop(epochs,batch_size):
     
 
 if __name__ == '__main__':
-    training_loop(3000,16)
+    training_loop(200,16)
 
 
 

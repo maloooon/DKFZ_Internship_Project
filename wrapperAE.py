@@ -513,8 +513,8 @@ def training_loop(batch_size,epochs):
     
 
     # optimizer
-    OPTIMIZER_1 = Adam(MODEL_1.parameters(), lr=0.0001)
-    OPTIMIZER_2 = Adam(MODEL_2.parameters(), lr=0.0001)
+    OPTIMIZER_1 = Adam(MODEL_1.parameters(), lr=0.0001) # img
+    OPTIMIZER_2 = Adam(MODEL_2.parameters(), lr=0.001) # rna
     
 
     # Loss function(s) : combination correlation maximization and reconstruction loss
@@ -525,8 +525,8 @@ def training_loop(batch_size,epochs):
     train_loss_reconstruction_img = []
     train_loss_correlation = []
 
-    scheduler_1 = StepLR(optimizer=OPTIMIZER_1, step_size=250, gamma=0.5) # every 50 epochs, calculate current lr with 0.5
-    scheduler_2 = StepLR(optimizer=OPTIMIZER_2, step_size=250, gamma=0.5)
+  #  scheduler_1 = StepLR(optimizer=OPTIMIZER_1, step_size=250, gamma=0.5) # every 50 epochs, calculate current lr with 0.5
+  #  scheduler_2 = StepLR(optimizer=OPTIMIZER_2, step_size=250, gamma=0.5)
 
 
     
@@ -557,7 +557,7 @@ def training_loop(batch_size,epochs):
             for substep, patch_sample in enumerate(data[1]):
             
                 decoded_output_num, bottleneck_value_num = MODEL_2.forward(data[0])
-                decoded_output_img, vector_patch, bottleneck_value_img = MODEL_1.forward(patch_sample)
+                decoded_output_img, decoded_output_img_prev, vector_patch, bottleneck_value_img = MODEL_1.forward(patch_sample)
                 
                 loss_reconstruction_num = LOSS_FUNC_RECONSTRUCTION(data[0], decoded_output_num)
                 loss_reconstruction_img = LOSS_FUNC_RECONSTRUCTION(patch_sample, decoded_output_img)
@@ -610,11 +610,11 @@ def training_loop(batch_size,epochs):
                   #  loss_correlation = pearson(bottleneck_value_img.clone().detach().squeeze(dim=1), bottleneck_value_num.clone().detach().squeeze(dim=1))
 
 
-                alpha = 0
-                beta = 1
-                gamma = 0
+                alpha = 0.05
+                beta = 0.4
+                gamma = 0.55
                 # Maximize correlation --> minimize negative correlation
-                full_loss = alpha * loss_reconstruction_num + beta * loss_reconstruction_img + gamma * - loss_correlation
+                full_loss = alpha * loss_reconstruction_num + beta * loss_reconstruction_img + gamma * - loss_correlation 
                 train_loss.append(float(full_loss))
                 train_loss_reconstruction_rna.append(float(loss_reconstruction_num))
                 train_loss_reconstruction_img.append(float(loss_reconstruction_img))
@@ -630,14 +630,15 @@ def training_loop(batch_size,epochs):
                     ca_mean_img = ((torch.mean(torch.abs(bottleneck_value_img), dim = 1)))
 
                     # Rename to names I used in architecture picture
-                    feat_img = vector_patch 
+                    feat_img = vector_patch # TODO : I take the vector patch in the encoding stage, maybe take the one in the decoding stage?
+                    feat_img_trial = decoded_output_img_prev
                     feat_rna = data[0]
 
                     batch_size = feat_img.size(dim=0)
 
     
                     # Current patch in substep
-                    coco_img = torch.empty(feat_img.size(dim=1)) # amount features
+                    coco_img = torch.empty(feat_img_trial.size(dim=1)) # amount features
 
                     # Current rna samples
                     coco_rna = torch.empty(feat_rna.size(dim=1)) # amount features
@@ -645,8 +646,9 @@ def training_loop(batch_size,epochs):
                     # Reshape feat_img so that we can iterate through amount of features to calculate each correlation coefficient
 
                     # This stays the same in the current SUBSTEP
-                    feat_img_reshaped = torch.transpose(feat_img,0,1) # amount features x batch size
+                    feat_img_reshaped = torch.transpose(feat_img_trial,0,1) # amount features x batch size
                     for i, x in enumerate(feat_img_reshaped):
+                        # correlation coefficient (loading) for each patch 
                         corr_coeff = abs(cos(x - x.mean(dim=0,keepdim=True), ca_mean_img - ca_mean_img.mean(dim=0,keepdim=True)))
                         corr_coeff_d = corr_coeff.clone().detach()
                         coco_img[i] = corr_coeff_d
@@ -655,7 +657,10 @@ def training_loop(batch_size,epochs):
                      # Also store overall corrleation between RNA & image patch
                     correlations_storage.append(loss_correlation)
                     vector_patch_d = vector_patch.clone().detach()
-                    pd.DataFrame(vector_patch_d.numpy()).to_csv("CCA-Project/coco_vals/patches/vector_patches_sample_batch_{}_image_patch_{}".format(step, substep))
+                    feat_img_trial_d = feat_img_trial.clone().detach()
+
+                   
+                    pd.DataFrame(feat_img_trial_d.numpy()).to_csv("CCA-Project/coco_vals_2/patches/vector_patches_sample_batch_{}_image_patch_{}".format(step, substep))
                    
 
                 
@@ -664,6 +669,7 @@ def training_loop(batch_size,epochs):
                     if substep == 99:
                         feat_rna_reshaped = torch.transpose(feat_rna,0,1)
                         for i, x in enumerate(feat_rna_reshaped):
+                            # correlation coefficient (loading) for each rna feature 
                             corr_coeff = abs(cos(x - x.mean(dim=0,keepdim=True), ca_mean_rna - ca_mean_rna.mean(dim=0,keepdim=True)))
                             corr_coeff_d = corr_coeff.clone().detach()
                             coco_rna[i] = corr_coeff_d
@@ -676,9 +682,9 @@ def training_loop(batch_size,epochs):
 
                         # For the current batch of samples, we save the coco values, correlation overall aswell as patches stored in tensors
                         
-                        pd.DataFrame(coco_rna.numpy()).to_csv("CCA-Project/coco_vals/rna_sample_batch_{}".format(step))
-                        pd.DataFrame(coco_img_total.numpy()).to_csv("CCA-Project/coco_vals/img_patches_sample_batch_{}".format(step))
-                        pd.DataFrame(correlations_total.numpy()).to_csv("CCA-Project/coco_vals/correlations_sample_batch_{}".format(step))
+                        pd.DataFrame(coco_rna.numpy()).to_csv("CCA-Project/coco_vals_2/rna_sample_batch_{}".format(step))
+                        pd.DataFrame(coco_img_total.numpy()).to_csv("CCA-Project/coco_vals_2/img_patches_sample_batch_{}".format(step))
+                        pd.DataFrame(correlations_total.numpy()).to_csv("CCA-Project/coco_vals_2/correlations_sample_batch_{}".format(step))
                        
 
                 OPTIMIZER_1.zero_grad()
@@ -686,8 +692,8 @@ def training_loop(batch_size,epochs):
                 full_loss.backward()
                 OPTIMIZER_1.step()
                 OPTIMIZER_2.step()
-                scheduler_1.step()
-                scheduler_2.step()
+            #    scheduler_1.step()
+            #    scheduler_2.step()
             
             
 
@@ -716,14 +722,14 @@ def training_loop(batch_size,epochs):
 
           
     # save CNN model
-    torch.save(MODEL_1.state_dict(), 'CCA-Project/cnn_ae_model/cnn_model.pt')
+    torch.save(MODEL_1.state_dict(), 'CCA-Project/cnn_ae_model/cnn_model_new.pt')
 
 
 
 
 if __name__ == '__main__':
-    training_loop(8,300)
-    
+    training_loop(8,600)
+
 
 
 
